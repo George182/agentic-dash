@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-dash"
+version = "0.1.0"
+description = "Plotly Dash data-science dashboard powered by a Google ADK agent (Gemini + BigQuery), streaming over the AG-UI protocol via SSE."
+requires-python = ">=3.12"
+dependencies = [
+    "ag-ui-adk==0.6.4",
+    "ag-ui-protocol==0.1.18",
+    "google-adk>=2.1.0",
+    "google-genai>=1.0",
+    "google-cloud-bigquery>=3.0",
+    "dash>=2.17",
+    "plotly>=5.0",
+    "fastapi>=0.115",
+    "a2wsgi>=1.10",
+    "uvicorn[standard]>=0.30",
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools]
+packages = ["agent", "app"]
+
+[tool.setuptools.package-data]
+app = ["assets/*"]
