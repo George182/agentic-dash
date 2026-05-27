@@ -54,6 +54,8 @@ dash_app.layout = html.Div(
         dcc.Graph(id="kpi-chart"),
         dash_table.DataTable(id="kpi-table", page_size=10,
                              style_table={"overflowX": "auto"}),
+        html.H4("Forecast"),
+        dcc.Graph(id="forecast-chart"),
     ],
 )
 
@@ -78,6 +80,34 @@ def render_results(state):
         fig.update_layout(xaxis_title=keys[0], yaxis_title=keys[1],
                           margin=dict(l=20, r=20, t=20, b=20))
     return rows, columns, fig
+
+
+@callback(
+    Output("forecast-chart", "figure"),
+    Input("kpis", "data"),
+    prevent_initial_call=True,
+)
+def render_forecast(state):
+    rows = (state or {}).get("forecast") or []
+    if not rows:
+        return go.Figure()
+    x = [r["date"] for r in rows]
+    fig = go.Figure()
+    # 80% confidence band: upper bound, then lower with fill between the two.
+    fig.add_trace(go.Scatter(x=x, y=[r.get("hi") for r in rows],
+                             line=dict(width=0), showlegend=False, hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=x, y=[r.get("lo") for r in rows], fill="tonexty",
+                             fillcolor="rgba(0,100,200,0.15)", line=dict(width=0),
+                             name="80% interval", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=x, y=[r.get("actual") for r in rows], mode="lines",
+                             name="actual", line=dict(color="#444")))
+    fig.add_trace(go.Scatter(x=x, y=[r.get("forecast") for r in rows], mode="lines",
+                             name="forecast", line=dict(color="#0064c8", dash="dash")))
+    meta = (state or {}).get("forecast_series") or {}
+    title = " / ".join(str(meta.get(k, "")) for k in ("country", "store", "product"))
+    fig.update_layout(title=title or "Forecast", xaxis_title="date",
+                      yaxis_title="num_sold", margin=dict(l=20, r=20, t=40, b=20))
+    return fig
 
 
 # Browser-side streamer: POSTs RunAgentInput to /agui, reads the SSE, and pushes
