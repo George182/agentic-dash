@@ -68,15 +68,37 @@ else
   green "Artifact Registry repo created"
 fi
 
-# ---------- 2. Cloud Build SA → roles/run.builder ----------
+# ---------- 2. Cloud Build identities — grant roles to BOTH SAs ----------
+# Google switched the default Cloud Build identity from the legacy
+# <project-number>@cloudbuild.gserviceaccount.com to the Compute Engine default
+# SA <project-number>-compute@developer.gserviceaccount.com (April 2024). When
+# `gcloud run deploy --source .` builds, it uses the Compute default unless
+# overridden — and that SA needs to read the source tarball from GCS, push the
+# image to Artifact Registry, and write build logs.
 PROJECT_NUMBER="$(gcloud projects describe "${PROJECT}" --format='value(projectNumber)')"
-CB_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
-cyan "Ensuring Cloud Build SA ${CB_SA} has roles/run.builder"
+LEGACY_CB_SA="${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+COMPUTE_CB_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+
+cyan "Granting Cloud Build identities the roles needed to build + deploy"
+# Legacy Cloud Build SA — kept for backward compat / deploy-to-Cloud Run hook
 gcloud projects add-iam-policy-binding "${PROJECT}" \
-  --member="serviceAccount:${CB_SA}" \
+  --member="serviceAccount:${LEGACY_CB_SA}" \
   --role=roles/run.builder \
   --condition=None --quiet >/dev/null
-green "Cloud Build SA has roles/run.builder"
+
+# Compute Engine default SA — the actual Cloud Build identity for new builds.
+# `cloudbuild.builds.builder` bundles storage.objects.get + artifactregistry
+# writer + logging.logWriter, which covers source pull + image push + logs.
+for role in \
+  roles/cloudbuild.builds.builder \
+  roles/artifactregistry.writer \
+  roles/logging.logWriter ; do
+  gcloud projects add-iam-policy-binding "${PROJECT}" \
+    --member="serviceAccount:${COMPUTE_CB_SA}" \
+    --role="${role}" \
+    --condition=None --quiet >/dev/null
+done
+green "Cloud Build identities have required roles"
 
 # ---------- 3. Secret Manager — create + grant accessor ----------
 create_or_update_secret() {
