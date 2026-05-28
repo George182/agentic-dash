@@ -10,12 +10,17 @@ from __future__ import annotations
 
 import datetime
 import decimal
+import json
 import os
 from typing import Any
 
 from google.adk.agents import LlmAgent
 from google.adk.tools import ToolContext
+from google.adk.tools.agent_tool import AgentTool
 from google.cloud import bigquery
+
+from .analytics_agent import analytics_agent
+from .throttle import throttle_before_model
 
 # Project billed for query execution (must have the BigQuery API enabled).
 _COMPUTE_PROJECT = os.environ.get("BQ_COMPUTE_PROJECT_ID") or os.environ.get(
@@ -86,6 +91,9 @@ def bqml_forecast(
     Returns recent actuals plus the forecast points (value + 80% interval).
     """
     horizon = max(1, min(int(horizon), 30))  # model was trained with HORIZON=30
+    # ML.FORECAST requires the settings STRUCT to be literal constants — query
+    # parameters are rejected. `horizon` is already clamped to a small int, so
+    # inlining it is safe; the LIMIT can still bind via parameter.
     sql = f"""
     WITH actuals AS (
       SELECT date, num_sold AS actual,
@@ -103,7 +111,7 @@ def bqml_forecast(
              confidence_interval_lower_bound AS lo,
              confidence_interval_upper_bound AS hi
       FROM ML.FORECAST(MODEL `{_MODEL}`,
-                       STRUCT(@horizon AS horizon, 0.8 AS confidence_level))
+                       STRUCT({horizon} AS horizon, 0.8 AS confidence_level))
       WHERE country=@country AND store=@store AND product=@product
     )
     SELECT * FROM actuals
@@ -114,7 +122,6 @@ def bqml_forecast(
         bigquery.ScalarQueryParameter("country", "STRING", country),
         bigquery.ScalarQueryParameter("store", "STRING", store),
         bigquery.ScalarQueryParameter("product", "STRING", product),
-        bigquery.ScalarQueryParameter("horizon", "INT64", horizon),
         bigquery.ScalarQueryParameter("history", "INT64", _HISTORY_DAYS),
     ]
     job = _bq().query(
@@ -138,9 +145,55 @@ def bqml_forecast(
     }
 
 
+async def call_analytics_agent(
+    tool_context: ToolContext,
+    question: str,
+) -> dict[str, Any]:
+    """Draw ONE matplotlib chart that answers `question` over the rows from
+    the most recent `bigquery_query`. Call this after running `bigquery_query`
+    when the user asks to plot, chart, visualize, or show a distribution /
+    trend / monthly view. The PNG is captured into the dashboard's Analysis
+    panel automatically; this tool returns the sub-agent's one-line text
+    summary.
+    """
+    rows = tool_context.state.get("rows") or []
+    if not rows:
+        return {
+            "status": "no_data",
+            "message": "No rows in state. Run bigquery_query first.",
+        }
+    request = (
+        f"User question: {question}\n\n"
+        f"Data ({min(len(rows), 50)} rows as JSON):\n"
+        f"{json.dumps(rows[:50], default=str)}\n\n"
+        "Produce ONE matplotlib chart that answers the question and save it as a PNG."
+    )
+    output = await AgentTool(agent=analytics_agent).run_async(
+        args={"request": request}, tool_context=tool_context
+    )
+    tool_context.state["analytics_agent_output"] = output
+    return {"status": "success", "summary": output}
+
+
 def _on_before_agent(callback_context) -> None:
-    callback_context.state.setdefault("row_count", 0)
-    callback_context.state.setdefault("rows", [])
+    """Reset per-run result keys at the start of every agent invocation.
+
+    Without this, sending a follow-up like "hello" (which doesn't invoke any
+    data tool) leaves the previous prompt's `rows` / `forecast` / `figures` /
+    `analytics_agent_output` visible in the dashboard — stale outputs that no
+    longer correspond to the current chat turn. Writing through
+    `callback_context.state` (a `State` proxy) records a delta that
+    `ag_ui_adk` forwards as `STATE_DELTA`, so the Dash render callbacks
+    receive empty values and fall back to their empty-state copy.
+    """
+    state = callback_context.state
+    state["rows"] = []
+    state["row_count"] = 0
+    state["last_query"] = ""
+    state["forecast"] = []
+    state["forecast_series"] = {}
+    state["figures"] = []
+    state["analytics_agent_output"] = ""
     return None
 
 
@@ -165,6 +218,11 @@ Choose the right tool:
 - For a forecast of a SINGLE series, call `bqml_forecast` with the exact
   country, store and product (and optional horizon, 1-30 days, default 30).
   Do NOT hand-write ML.FORECAST SQL — the tool runs it and feeds the chart.
+- For a CHART of data you just fetched ("plot", "chart", "visualize",
+  "distribution", "trend", "monthly", "by month/week/year", etc.), first call
+  `bigquery_query` to get the rows, then call `call_analytics_agent(question)`.
+  The sub-agent draws ONE matplotlib chart into the Analysis panel. Do NOT
+  try to describe the plot from your own narration — the sub-agent renders it.
 
 After a tool runs, summarize the result in plain language. Prefer compact
 aggregations (GROUP BY / LIMIT) over raw row dumps.
@@ -174,6 +232,7 @@ root_agent = LlmAgent(
     name="DataScienceAgent",
     model=os.environ.get("AGENT_MODEL", "gemini-2.5-flash"),
     instruction=_INSTRUCTION,
-    tools=[bigquery_query, bqml_forecast],
+    tools=[bigquery_query, bqml_forecast, call_analytics_agent],
     before_agent_callback=_on_before_agent,
+    before_model_callback=throttle_before_model,
 )

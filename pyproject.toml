@@ -13,6 +13,7 @@ dependencies = [
     "google-adk>=2.1.0",
     "google-genai>=1.0",
     "google-cloud-bigquery>=3.0",
+    "google-cloud-aiplatform[agent_engines]>=1.71",
     "dash>=2.17",
     "plotly>=5.0",
     "fastapi>=0.115",
@@ -25,4 +26,4 @@ dependencies = [
 packages = ["agent", "app"]
 
 [tool.setuptools.package-data]
-app = ["assets/*"]
+app = ["assets/*", "assets/fonts/*"]

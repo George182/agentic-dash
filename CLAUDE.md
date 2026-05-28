@@ -97,7 +97,7 @@ it first would shadow `/agui`. Keep the AG-UI endpoint above the `app.mount("/",
   *code* still defaults to public `bigquery-public-data.thelook_ecommerce`, but the committed
   `_INSTRUCTION` now describes the **sticker-sales forecasting dataset** (`train`/`test` +
   the `arima_sales` model). So point the env at a project holding `forecasting_sticker_sales`
-  + that model (e.g. `solid-drive-497516-v0`); using a different dataset means rewriting
+  + that model (set `BQ_DATA_PROJECT_ID` to your own); using a different dataset means rewriting
   `_INSTRUCTION`.
 - **The agent has two tools** on one `LlmAgent` (no RAG / Code Interpreter / AlloyDB):
   `bigquery_query` (free-form NL2SQL; BQML statements like `CREATE MODEL` / `ML.PREDICT` are

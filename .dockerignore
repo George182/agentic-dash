@@ -1,0 +1,33 @@
+# Local dev artifacts (large, not needed in the image)
+.venv/
+.env
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+agentic_dash.egg-info/
+build/
+dist/
+*.egg-info/
+
+# Git metadata
+.git/
+.gitignore
+.gitattributes
+
+# IDE / editor noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Docs + meta (not used at runtime)
+README.md
+CLAUDE.md
+
+# Repo-only tooling (never used inside the container)
+tools/
+
+# The Dockerfile itself + this file
+Dockerfile
+.dockerignore
