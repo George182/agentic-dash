@@ -155,3 +155,13 @@ image, or the application's stdout/stderr logs.
 
 If you add a new secret-bearing env var, mirror this split: `--set-secrets` for
 identifiers, `--set-env-vars` only for true non-sensitive config.
+
+## Roadmap
+
+- [ ] **Terraform module for the deployed setup.** Codify the
+  `tools/deploy.sh` provisioning (runtime SA + role bindings, 6 Secret
+  Manager secrets + IAM, Artifact Registry repo, Cloud Run service spec) as
+  Terraform under `infra/terraform/`, with `terraform import` of the live
+  resources after the first manual deploy. State backend in GCS. Eventually
+  replaces the shell script; the script stays as a fallback and
+  documentation.
