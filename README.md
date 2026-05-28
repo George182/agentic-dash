@@ -176,3 +176,14 @@ identifiers, `--set-env-vars` only for true non-sensitive config.
   one stable URL, SSO-protected, no client-side tooling required. Best
   built alongside the Terraform module above so the LB + IAP resources
   land in IaC from day one.
+- [ ] **Prune enabled APIs and provisioned resources.** Audit `gcloud
+  services list --enabled` against the minimum required set
+  (`aiplatform`, `bigquery`, `bigquerystorage`, `run`, `cloudbuild`,
+  `artifactregistry`, `secretmanager`, `storage`, `iam`, `iamcredentials`,
+  `logging`, `cloudtrace` — plus `compute`/`networkservices`/`iap` once
+  the LB+IAP work lands) and disable the rest. Audit Vertex AI for any
+  orphaned Code Interpreter Extensions (one LRO returned 404 mid-create
+  during the Option-2 pivot — verify nothing lingers) and any unused
+  Agent Engines / sandboxes outside the pinned pair. Codify the minimum
+  required APIs in a `tools/enable-apis.sh` so a fresh project can be set
+  up with one command.
