@@ -165,3 +165,14 @@ identifiers, `--set-env-vars` only for true non-sensitive config.
   resources after the first manual deploy. State backend in GCS. Eventually
   replaces the shell script; the script stays as a fallback and
   documentation.
+- [ ] **HTTPS Load Balancer + IAP for permanent browser access.** Today
+  the service is reachable only via `gcloud run services proxy`
+  (`--ingress=internal-and-cloud-load-balancing` blocks direct browser hits
+  from outside the VPC). Stand up a serverless NEG → backend service →
+  URL map → target HTTPS proxy → global forwarding rule with a reserved
+  static IP and a managed SSL cert, then enable IAP on the backend with the
+  OAuth consent screen wired up, and grant
+  `roles/iap.httpsResourceAccessor` to the users/groups allowed in. Result:
+  one stable URL, SSO-protected, no client-side tooling required. Best
+  built alongside the Terraform module above so the LB + IAP resources
+  land in IaC from day one.
