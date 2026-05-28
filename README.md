@@ -141,6 +141,67 @@ Notes:
   the runtime roles: Vertex AI User, BigQuery Job User + Data Viewer, Logging
   Writer. The script handles Secret Accessor itself.
 
+## Accessing the deployed app
+
+The deployed service uses `--ingress=internal-and-cloud-load-balancing` + IAM
+auth (`--no-allow-unauthenticated`), so the public `*.run.app` URL is **not**
+reachable from the open internet — it requires either being inside the
+project's VPC or going through Google's Cloud Run Admin API path. Three ways
+to get to it in practice:
+
+### Option A — `gcloud run services proxy` from your laptop *(recommended for solo dev)*
+
+Opens a local tunnel through Google's authenticated proxy. Bypasses the
+internal-ingress restriction because the proxy uses the Cloud Run Admin API
+path, not the public network.
+
+```bash
+# One-time: grant your account roles/run.invoker on the service
+gcloud run services add-iam-policy-binding agentic-dash \
+  --region=us-central1 \
+  --project=YOUR_PROJECT \
+  --member=user:you@example.com \
+  --role=roles/run.invoker
+
+# Open the tunnel (keeps running; Ctrl-C to stop)
+gcloud run services proxy agentic-dash \
+  --region=us-central1 \
+  --project=YOUR_PROJECT
+```
+
+Then open **http://127.0.0.1:8080** in your browser.
+
+### Option B — Cloud Shell *(no laptop tooling)*
+
+In Cloud Shell at https://shell.cloud.google.com, run the same
+`gcloud run services proxy` command, then use Cloud Shell's **Web Preview →
+Preview on port 8080** to get a Google-signed temporary URL Chrome can open.
+
+For non-UI verification, a single curl with an identity token also works
+from Cloud Shell because the Cloud Run Admin API path is used:
+
+```bash
+SVC_URL=$(gcloud run services describe agentic-dash \
+  --region=us-central1 --project=YOUR_PROJECT \
+  --format='value(status.url)')
+
+curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" "${SVC_URL}/"
+```
+
+### Option C — HTTPS Load Balancer + IAP *(production-grade browser access)*
+
+Once the LB + IAP roadmap item lands, the service will be reachable at a
+fixed `https://<domain-or-hostname>/` enforced by IAP SSO — no client-side
+tooling needed for end users. Until then, Options A or B are the path.
+
+### Logs while testing
+
+```bash
+gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=agentic-dash' \
+  --project=YOUR_PROJECT --limit=50 \
+  --format='table(timestamp,severity,textPayload)'
+```
+
 ## Secrets posture
 
 This project is designed so secret values never enter a tracked file, a built
