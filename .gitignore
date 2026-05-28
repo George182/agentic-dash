@@ -4,6 +4,26 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.local
+.env.*.local
 .DS_Store
 build/
 dist/
+
+# GCP credentials — never commit service-account keys or ADC
+*service-account*.json
+*-sa-key.json
+application_default_credentials.json
+gha-creds-*.json
+
+# Tooling caches / logs
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.log
+
+# Editors
+.vscode/
+.idea/

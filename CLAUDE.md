@@ -6,9 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A single-container app: a Plotly Dash dashboard whose results are produced by a Google
 ADK agent (Gemini + BigQuery), streamed to the browser over the **AG-UI protocol** via
-Server-Sent Events. The user asks a natural-language question; the agent writes one
-BigQuery Standard SQL query, runs it, and streams chat tokens, tool trajectory, and a
-result snapshot back as AG-UI events.
+Server-Sent Events. The user asks a natural-language question; the agent either writes one
+BigQuery Standard SQL query or runs a BQML ARIMA_PLUS forecast, and streams chat tokens,
+tool trajectory, and a result snapshot (table + chart, and/or a forecast chart) back as
+AG-UI events.
 
 `README.md` has the full prose architecture diagram, prerequisites, the env-var config
 table, and Cloud Run deploy notes — read it for those. This file captures the things that
@@ -43,8 +44,10 @@ print("OK")
 PY
 ```
 
-Full verification is manual: run the server, open http://localhost:8080, ask e.g. *"top 10 product
-categories by number of orders"*, and watch chat / trajectory / table+chart populate.
+Full verification is manual: run the server, open http://localhost:8080, then ask
+*"total sales per country"* (exercises `bigquery_query` → table+chart) and *"forecast Kaggle
+stickers at Discount Stickers in Canada for 30 days"* (exercises `bqml_forecast` → forecast
+chart), watching chat / trajectory / charts populate.
 
 ## Architecture: the three things that aren't obvious
 
@@ -54,9 +57,15 @@ SSE stream itself (there is no Python AG-UI browser client), and pushes live upd
 Dash components *by id* with `window.dash_clientside.set_props` — `#chat`, `#trajectory`,
 and the `kpis` store. The `clientside_callback` in `app/dash_app.py` declares an Output
 (`run-status`) only for the final status string; the streaming content does **not** flow
-through Dash's normal callback graph. To add a new streamed surface you must edit *both*
-files: add a component (and any rendering callback) in `dash_app.py`, and handle the
-corresponding AG-UI event in `agui.js`.
+through Dash's normal callback graph. To add a streamed surface that needs a *new event
+type* (or a new `set_props` target) you must edit *both* files: add a component (and any
+rendering callback) in `dash_app.py`, and handle the event in `agui.js`.
+
+  **Caveat — the cheaper path:** because `agui.js` writes the *entire* state object to the
+  `kpis` store on every STATE event, a surface that only needs more *data* (not a new event
+  type) can ride in `kpis` for free — just have a tool write a new state key and add a
+  server-side callback in `dash_app.py` that reads it. That's exactly how the forecast chart
+  works (`state["forecast"]` → `render_forecast`), with **no `agui.js` change**.
 
 **2. Data reaches the chart through agent state, not a return value.**
 `bigquery_query` in `agent/data_science_agent.py` writes `last_query` / `row_count` / `rows`
@@ -84,11 +93,25 @@ it first would shadow `/agui`. Keep the AG-UI endpoint above the `app.mount("/",
   (200) bounds what's pushed into dashboard state; a literal `50` bounds what's returned to
   the model. Adjust the right one for the symptom you're fixing.
 - **Two BigQuery projects are separate by design:** `BQ_COMPUTE_PROJECT_ID` is billed for
-  running queries; `BQ_DATA_PROJECT_ID`/`BQ_DATASET_ID` point at where the data lives
-  (defaults to public `bigquery-public-data.thelook_ecommerce`, so no data loading needed).
-- **The agent is deliberately minimal** — one `LlmAgent`, one `bigquery_query` tool, no RAG
-  / Code Interpreter / AlloyDB. BQML statements (`CREATE MODEL`, `ML.PREDICT`) are just SQL
-  through the same tool. Keep it small unless asked otherwise.
+  running queries; `BQ_DATA_PROJECT_ID`/`BQ_DATASET_ID` point at where the data lives. The
+  *code* still defaults to public `bigquery-public-data.thelook_ecommerce`, but the committed
+  `_INSTRUCTION` now describes the **sticker-sales forecasting dataset** (`train`/`test` +
+  the `arima_sales` model). So point the env at a project holding `forecasting_sticker_sales`
+  + that model (set `BQ_DATA_PROJECT_ID` to your own); using a different dataset means rewriting
+  `_INSTRUCTION`.
+- **The agent has two tools** on one `LlmAgent` (no RAG / Code Interpreter / AlloyDB):
+  `bigquery_query` (free-form NL2SQL; BQML statements like `CREATE MODEL` / `ML.PREDICT` are
+  just SQL through it) and `bqml_forecast` (single-series ARIMA_PLUS forecast, below). The
+  instruction is **specialized for the sticker-sales dataset**, not a generic explorer. Keep
+  it small unless asked otherwise.
+- **The forecast surface.** `bqml_forecast(country, store, product, horizon)` in
+  `data_science_agent.py` runs a *parameterized* query that `UNION ALL`s recent `train`
+  actuals with `ML.FORECAST(MODEL arima_sales, ...)` for one series, then writes
+  `state["forecast"]` (rows of `date/actual/forecast/lo/hi`) and `state["forecast_series"]`.
+  `render_forecast` in `dash_app.py` reads `state["forecast"]` from the `kpis` store and draws
+  an actual line + dashed forecast + shaded 80% band. `horizon` is clamped to 30 (the model's
+  trained `HORIZON`); the two near-empty "Holographic Goose" series have no model, so a
+  forecast for them returns history only.
 - **State services are in-memory** (`use_in_memory_services=True`), so a deployment must pin
   `--max-instances=1` or a thread's state won't survive across instances.
 - `_jsonable()` exists because BigQuery returns dates/`Decimal`/`bytes` that aren't
